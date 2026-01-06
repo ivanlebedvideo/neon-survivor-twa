@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neon Survivor TWA - Fixed</title>
+    <title>Neon Survivor - Multi-Touch Edition</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; touch-action: none; }
@@ -17,33 +17,22 @@
         .setting label { font-size: 10px; color: #4ecca3; display: block; margin-bottom: 4px; }
         .val { float: right; color: #f9ca24; font-weight: bold; }
         
-        input[type=range] { width: 100%; accent-color: #e94560; height: 20px; }
-        #startBtn { background: #e94560; color: white; border: none; padding: 15px; width: 100%; font-size: 18px; font-weight: bold; border-radius: 10px; margin-top: 15px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+        input[type=range] { width: 100%; accent-color: #e94560; }
+        #startBtn { background: #e94560; color: white; border: none; padding: 15px; width: 100%; font-size: 18px; font-weight: bold; border-radius: 10px; margin-top: 15px; cursor: pointer; }
 
-        #joyBound { position: absolute; bottom: 30px; left: 30px; width: 100px; height: 100px; background: rgba(255,255,255,0.05); border-radius: 50%; border: 1px solid rgba(78, 204, 163, 0.2); display: none; pointer-events: none; }
+        #joyBound { position: absolute; width: 100px; height: 100px; background: rgba(255,255,255,0.05); border-radius: 50%; border: 1px solid rgba(78, 204, 163, 0.3); display: none; pointer-events: none; transform: translate(-50%, -50%); }
         #joyStick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; background: #4ecca3; border-radius: 50%; transform: translate(-50%, -50%); }
 
         #levelUp { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #16213e; padding: 20px; border: 2px solid #e94560; border-radius: 15px; display: none; z-index: 200; width: 80%; text-align: center; }
-        .card { background: #0f3460; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid #30475e; font-size: 14px; }
-        
-        #errorLog { position: absolute; bottom: 5px; width: 100%; font-size: 8px; color: red; text-align: center; pointer-events: none; }
+        .card { background: #0f3460; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid #30475e; font-weight: bold; }
     </style>
 </head>
 <body>
-    <!-- Лог ошибок для отладки прямо в Телеграме -->
-    <div id="errorLog"></div>
-
     <div id="menu">
         <div class="menu-box">
-            <h2 style="color: #e94560; margin: 0 0 15px 0; font-size: 22px;">NEON SURVIVOR</h2>
-            <div class="setting">
-                <label>XP MULT <span id="xpVal" class="val">x2</span></label>
-                <input type="range" id="xpSlider" min="1" max="10" value="2">
-            </div>
-            <div class="setting">
-                <label>SPAWN INTENSITY <span id="spawnVal" class="val">x1</span></label>
-                <input type="range" id="spawnSlider" min="1" max="5" value="1" step="0.5">
-            </div>
+            <h2 style="color: #e94560; margin: 0 0 15px 0;">NEON SURVIVOR</h2>
+            <div class="setting"><label>XP MULT <span id="xpVal" class="val">x2</span></label><input type="range" id="xpSlider" min="1" max="10" value="2"></div>
+            <div class="setting"><label>SPAWN <span id="spawnVal" class="val">x1</span></label><input type="range" id="spawnSlider" min="1" max="5" value="1" step="0.5"></div>
             <button id="startBtn">START MISSION</button>
         </div>
     </div>
@@ -51,15 +40,12 @@
     <div id="ui">
         <div class="stat">HP: <span id="hp">100</span> | LVL: <span id="lvl">1</span></div>
         <div class="stat">EXP: <span id="exp">0</span>/<span id="expNeeded">100</span></div>
-        <div id="activeStats" style="display:none"></div> <!-- Добавлен скрытый элемент, чтобы избежать ошибок -->
     </div>
 
     <div id="joyBound"><div id="joyStick"></div></div>
-    <div id="levelUp"><h3 style="color: #e94560">UPGRADE</h3><div id="options"></div></div>
+    <div id="levelUp"><h3 style="color: #e94560">CHOOSE POWER</h3><div id="options"></div></div>
 
-    <script type="importmap">
-        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
-    </script>
+    <script type="importmap">{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }</script>
 
     <script type="module">
         import * as THREE from 'three';
@@ -68,20 +54,17 @@
         import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
         import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-        // Отлов ошибок для вывода на экран (поможет нам, если не заработает)
-        window.onerror = function(m, u, l) { document.getElementById('errorLog').innerText = m + " at " + l; };
-
         const tg = window.Telegram.WebApp; tg.expand(); tg.ready();
 
         let audioCtx; 
         function playSfx(type) {
-            try {
-                if (!audioCtx || audioCtx.state === 'suspended') return;
-                const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-                o.type = 'triangle'; o.frequency.setValueAtTime(600, audioCtx.currentTime);
-                g.gain.setValueAtTime(0.04, audioCtx.currentTime);
-                o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + 0.1);
-            } catch(e) {}
+            if (!audioCtx || audioCtx.state === 'suspended') return;
+            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+            o.type = (type === 'explosion') ? 'sawtooth' : 'triangle';
+            o.frequency.setValueAtTime(type === 'explosion' ? 120 : 600, audioCtx.currentTime);
+            g.gain.setValueAtTime(0.04, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + 0.1);
         }
 
         const scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x000000, 0.03);
@@ -98,109 +81,166 @@
 
         const game = { active: false, paused: false, xpMult: 2, spawnMult: 1 };
         const player = {
-            group: new THREE.Group(), hp: 100, level: 1, exp: 0, expNeeded: 100, speed: 0.14, fireRate: 600, lastShot: 0, damage: 30, stats: {}
+            group: new THREE.Group(), hp: 100, level: 1, exp: 0, expNeeded: 100, speed: 0.15, fireRate: 600, lastShot: 0, damage: 30, pierce: 0, shieldLvl: 0, shields: []
         };
         const pMesh = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.2, 4), new THREE.MeshStandardMaterial({ color: 0x4ecca3, emissive: 0x4ecca3, emissiveIntensity: 2 }));
         pMesh.rotation.x = Math.PI/2; player.group.add(pMesh); scene.add(player.group);
         const light = new THREE.PointLight(0x4ecca3, 40, 20); scene.add(light);
 
         let yaw = 0, pitch = 0.6;
-        const enemies = [], bullets = [], orbs = [];
+        const enemies = [], bullets = [], orbs = [], particles = [];
 
-        // Слайдеры
-        const xpS = document.getElementById('xpSlider'), spS = document.getElementById('spawnSlider');
-        if(xpS) xpS.oninput = (e) => { game.xpMult = parseFloat(e.target.value); document.getElementById('xpVal').innerText = 'x'+game.xpMult; };
-        if(spS) spS.oninput = (e) => { game.spawnMult = parseFloat(e.target.value); document.getElementById('spawnVal').innerText = 'x'+game.spawnMult; };
+        // --- MULTI-TOUCH ENGINE ---
+        let moveTouchId = null, camTouchId = null;
+        let joyStart = { x: 0, y: 0 }, joyVec = { x: 0, y: 0 };
+        let camLast = { x: 0, y: 0 };
 
-        // Джойстик
-        let joyPos = { x: 0, y: 0 }, tStart = { x: 0, y: 0 };
         document.addEventListener('touchstart', (e) => {
             if (!game.active || game.paused) return;
-            const t = e.touches[0];
-            if (t.clientX < window.innerWidth / 2) {
-                const jb = document.getElementById('joyBound');
-                jb.style.display = 'block'; jb.style.left = (t.clientX - 50) + 'px'; jb.style.top = (t.clientY - 50) + 'px';
+            for (let t of e.changedTouches) {
+                if (t.clientX < window.innerWidth / 2 && moveTouchId === null) {
+                    moveTouchId = t.identifier;
+                    joyStart = { x: t.clientX, y: t.clientY };
+                    const jb = document.getElementById('joyBound');
+                    jb.style.display = 'block'; jb.style.left = t.clientX + 'px'; jb.style.top = t.clientY + 'px';
+                } else if (camTouchId === null) {
+                    camTouchId = t.identifier;
+                    camLast = { x: t.clientX, y: t.clientY };
+                }
             }
-            tStart = { x: t.clientX, y: t.clientY };
         }, {passive: false});
 
         document.addEventListener('touchmove', (e) => {
             if (!game.active || game.paused) return;
-            const t = e.touches[0];
-            const dx = t.clientX - tStart.x, dy = t.clientY - tStart.y;
-            if (t.clientX < window.innerWidth / 2) {
-                const dist = Math.min(50, Math.sqrt(dx*dx + dy*dy));
-                const ang = Math.atan2(dy, dx);
-                joyPos = { x: Math.cos(ang) * (dist/50), y: Math.sin(ang) * (dist/50) };
-                document.getElementById('joyStick').style.left = `calc(50% + ${joyPos.x * 35}px)`;
-                document.getElementById('joyStick').style.top = `calc(50% + ${joyPos.y * 35}px)`;
-            } else {
-                yaw -= dx * 0.007; pitch = Math.max(-0.2, Math.min(1.1, pitch + dy * 0.007));
-                tStart = { x: t.clientX, y: t.clientY };
+            for (let t of e.changedTouches) {
+                if (t.identifier === moveTouchId) {
+                    const dx = t.clientX - joyStart.x, dy = t.clientY - joyStart.y;
+                    const dist = Math.min(50, Math.sqrt(dx*dx + dy*dy));
+                    const ang = Math.atan2(dy, dx);
+                    joyVec = { x: Math.cos(ang) * (dist/50), y: Math.sin(ang) * (dist/50) };
+                    document.getElementById('joyStick').style.left = `calc(50% + ${joyVec.x * 35}px)`;
+                    document.getElementById('joyStick').style.top = `calc(50% + ${joyVec.y * 35}px)`;
+                } else if (t.identifier === camTouchId) {
+                    const dx = t.clientX - camLast.x, dy = t.clientY - camLast.y;
+                    yaw -= dx * 0.007; pitch = Math.max(-0.2, Math.min(1.1, pitch + dy * 0.007));
+                    camLast = { x: t.clientX, y: t.clientY };
+                }
             }
         }, {passive: false});
 
-        document.addEventListener('touchend', () => { 
-            document.getElementById('joyBound').style.display = 'none'; joyPos = { x: 0, y: 0 }; 
+        document.addEventListener('touchend', (e) => {
+            for (let t of e.changedTouches) {
+                if (t.identifier === moveTouchId) {
+                    moveTouchId = null; joyVec = { x: 0, y: 0 };
+                    document.getElementById('joyBound').style.display = 'none';
+                } else if (t.identifier === camTouchId) {
+                    camTouchId = null;
+                }
+            }
         });
 
-        // КНОПКА СТАРТА
-        document.getElementById('startBtn').addEventListener('click', function() {
-            // Сначала запускаем игру, потом пробуем звук
-            game.active = true;
-            document.getElementById('menu').style.display = 'none';
-            
+        // --- UPGRADES & SHIELDS ---
+        function updateShields() {
+            player.shields.forEach(s => scene.remove(s)); player.shields = [];
+            for(let i=0; i<player.shieldLvl; i++) {
+                const s = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.1, 0.4), new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 3 }));
+                scene.add(s); player.shields.push(s);
+            }
+        }
+
+        function createExplosion(pos) {
+            playSfx('explosion');
+            for(let i=0; i<10; i++) {
+                const p = new THREE.Mesh(new THREE.SphereGeometry(0.12), new THREE.MeshBasicMaterial({ color: 0xe94560 }));
+                p.position.copy(pos); p.vel = new THREE.Vector3((Math.random()-0.5)*0.5, Math.random()*0.5, (Math.random()-0.5)*0.5);
+                p.life = 1.0; scene.add(p); particles.push(p);
+            }
+        }
+
+        function levelUp() {
+            game.paused = true; player.exp -= player.expNeeded; player.expNeeded *= 1.4; player.level++;
+            document.getElementById('levelUp').style.display = 'block';
+            const ops = document.getElementById('options'); ops.innerHTML = '';
+            const pool = [
+                {n:'Damage+', f:()=>player.damage+=15}, {n:'Rate+', f:()=>player.fireRate*=0.85},
+                {n:'Pierce+', f:()=>player.pierce++}, {n:'Shield+', f:()=>{player.shieldLvl++; updateShields();}}
+            ];
+            pool.sort(()=>0.5-Math.random()).slice(0,3).forEach(u => {
+                const c = document.createElement('div'); c.className = 'card'; c.innerText = u.n;
+                c.onclick = () => { u.f(); document.getElementById('levelUp').style.display='none'; game.paused=false; };
+                ops.appendChild(c);
+            });
+        }
+
+        // --- START ---
+        document.getElementById('startBtn').onclick = () => {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if (audioCtx.state === 'suspended') audioCtx.resume().catch(e => console.log(e));
-        });
+            game.active = true; document.getElementById('menu').style.display = 'none';
+            game.xpMult = parseFloat(document.getElementById('xpSlider').value);
+            game.spawnMult = parseFloat(document.getElementById('spawnSlider').value);
+        };
 
         function animate() {
             requestAnimationFrame(animate);
+            const time = Date.now() * 0.001;
             if (game.active && !game.paused) {
                 player.group.rotation.y = yaw;
-                if (joyPos.x !== 0 || joyPos.y !== 0) {
-                    const mv = new THREE.Vector3(joyPos.x, 0, joyPos.y).applyQuaternion(player.group.quaternion).multiplyScalar(player.speed);
+                if (joyVec.x !== 0 || joyVec.y !== 0) {
+                    const mv = new THREE.Vector3(joyVec.x, 0, joyVec.y).applyQuaternion(player.group.quaternion).multiplyScalar(player.speed);
                     player.group.position.add(mv);
                 }
 
+                // Shields
+                player.shields.forEach((s, i) => {
+                    const a = time * 3 + (i / player.shields.length) * Math.PI * 2;
+                    s.position.set(player.group.position.x + Math.cos(a)*3, 0.6, player.group.position.z + Math.sin(a)*3);
+                    s.rotation.y = -a;
+                    for(let j=enemies.length-1; j>=0; j--) {
+                        if(s.position.distanceTo(enemies[j].position) < 1.5) {
+                            enemies[j].hp -= 1.2; if(enemies[j].hp <= 0) { createExplosion(enemies[j].position); scene.remove(enemies[j]); enemies.splice(j, 1); }
+                        }
+                    }
+                });
+
+                // Shooting
                 if (Date.now() - player.lastShot > player.fireRate && enemies.length > 0) {
+                    let target = enemies[0];
                     const b = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshBasicMaterial({ color: 0xffffff }));
                     b.position.copy(player.group.position);
-                    b.vel = new THREE.Vector3().subVectors(enemies[0].position, b.position).normalize().multiplyScalar(0.7);
-                    scene.add(b); bullets.push(b); playSfx('shot'); player.lastShot = Date.now();
+                    b.vel = new THREE.Vector3().subVectors(target.position, b.position).normalize().multiplyScalar(0.7);
+                    b.hits = []; scene.add(b); bullets.push(b); playSfx('shot'); player.lastShot = Date.now();
                 }
 
+                // Bullets
                 for(let i=bullets.length-1; i>=0; i--) {
                     bullets[i].position.add(bullets[i].vel);
                     if(bullets[i].position.distanceTo(player.group.position) > 40) { scene.remove(bullets[i]); bullets.splice(i, 1); continue; }
                     for(let j=enemies.length-1; j>=0; j--) {
-                        if(bullets[i].position.distanceTo(enemies[j].position) < 1.3) {
-                            enemies[j].hp -= player.damage;
+                        if(bullets[i].position.distanceTo(enemies[j].position) < 1.3 && !bullets[i].hits.includes(enemies[j])) {
+                            enemies[j].hp -= player.damage; bullets[i].hits.push(enemies[j]);
                             if(enemies[j].hp <= 0) {
-                                playSfx('explosion');
+                                createExplosion(enemies[j].position);
                                 const o = new THREE.Mesh(new THREE.OctahedronGeometry(0.3), new THREE.MeshBasicMaterial({ color: 0xf9ca24 }));
                                 o.position.copy(enemies[j].position); scene.add(o); orbs.push(o);
                                 scene.remove(enemies[j]); enemies.splice(j, 1);
                             }
-                            scene.remove(bullets[i]); bullets.splice(i, 1); break;
+                            if(bullets[i].hits.length > player.pierce) { scene.remove(bullets[i]); bullets.splice(i, 1); break; }
                         }
                     }
                 }
 
+                // Particles
+                for(let i=particles.length-1; i>=0; i--) {
+                    particles[i].position.add(particles[i].vel); particles[i].life -= 0.03; particles[i].scale.setScalar(particles[i].life);
+                    if(particles[i].life <= 0) { scene.remove(particles[i]); particles.splice(i, 1); }
+                }
+
+                // Gems & Spawn
                 for(let i=orbs.length-1; i>=0; i--) {
                     if(orbs[i].position.distanceTo(player.group.position) < 8) {
                         orbs[i].position.lerp(player.group.position, 0.2);
                         if(orbs[i].position.distanceTo(player.group.position) < 1.1) {
-                            player.exp += 20 * game.xpMult;
-                            if(player.exp >= player.expNeeded) { 
-                                game.paused = true; document.getElementById('levelUp').style.display = 'block';
-                                const ops = document.getElementById('options'); ops.innerHTML = '';
-                                ['Dmg+', 'Rate+'].forEach(t => {
-                                    const c = document.createElement('div'); c.className = 'card'; c.innerText = t;
-                                    c.onclick = () => { if(t.includes('Dmg')) player.damage += 15; else player.fireRate *= 0.85; document.getElementById('levelUp').style.display = 'none'; game.paused = false; };
-                                    ops.appendChild(c);
-                                });
-                            }
+                            player.exp += 20 * game.xpMult; if(player.exp >= player.expNeeded) levelUp();
                             scene.remove(orbs[i]); orbs.splice(i, 1);
                         }
                     }
@@ -210,7 +250,7 @@
                     const a = Math.random()*Math.PI*2;
                     const e = new THREE.Mesh(new THREE.DodecahedronGeometry(0.6), new THREE.MeshStandardMaterial({ color: 0xe94560, emissive: 0xe94560 }));
                     e.position.set(player.group.position.x+Math.cos(a)*35, 0.6, player.group.position.z+Math.sin(a)*35);
-                    e.hp = 30; scene.add(e); enemies.push(e);
+                    e.hp = 30 + player.level*5; scene.add(e); enemies.push(e);
                 }
                 enemies.forEach(e => e.position.add(new THREE.Vector3().subVectors(player.group.position, e.position).normalize().multiplyScalar(0.06)));
             }
@@ -224,11 +264,6 @@
             composer.render();
         }
         animate();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight);
-        });
     </script>
 </body>
 </html>

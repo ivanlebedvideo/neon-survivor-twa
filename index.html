@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D Neon Survivor - Mobile Edition</title>
+    <style>
+        body { margin: 0; background: #000; color: #fff; font-family: 'Courier New', monospace; overflow: hidden; touch-action: none; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; }
+        .stat { font-size: 14px; margin-bottom: 2px; color: #4ecca3; text-shadow: 0 0 5px #000; }
+        
+        /* Виртуальный джойстик */
+        #joystick-zone { position: absolute; bottom: 40px; left: 40px; width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; z-index: 60; border: 1px solid rgba(78,204,163,0.3); }
+        #joystick-handle { position: absolute; top: 50%; left: 50%; width: 50px; height: 50px; background: #4ecca3; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 15px #4ecca3; }
+
+        /* Меню старта */
+        #instructions { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0,0,0,0.9); z-index: 100; }
+        .menu-box { background: #16213e; padding: 30px; border: 2px solid #e94560; border-radius: 15px; text-align: center; width: 80%; max-width: 400px; }
+        
+        #levelUp { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #16213e; padding: 20px; border: 2px solid #e94560; display: none; z-index: 110; text-align: center; width: 80%; border-radius: 12px; }
+        .card { background: #0f3460; padding: 15px; margin: 10px 0; border: 1px solid #30475e; cursor: pointer; border-radius: 8px; font-weight: bold; }
+        
+        button#startBtn { background: #e94560; color: white; border: none; padding: 15px; font-size: 18px; font-weight: bold; width: 100%; border-radius: 10px; margin-top: 15px; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat">HP: <span id="hp">100</span> | LVL: <span id="lvl">1</span></div>
+    </div>
+
+    <div id="joystick-zone"><div id="joystick-handle"></div></div>
+
+    <div id="instructions">
+        <div class="menu-box">
+            <h1 style="color: #e94560; margin-bottom: 5px;">NEON MOBILE</h1>
+            <p style="color: #4ecca3; font-size: 12px;">Left: Move | Right: Look</p>
+            <button id="startBtn">START GAME</button>
+        </div>
+    </div>
+
+    <div id="levelUp">
+        <h2 style="color: #e94560">UPGRADE</h2>
+        <div id="options"></div>
+    </div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+        // --- AUDIO ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSfx(type) {
+            if (audioCtx.state === 'suspended') return;
+            if (type === 'shot') {
+                const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+                o.type='triangle'; o.frequency.setValueAtTime(600, audioCtx.currentTime);
+                g.gain.setValueAtTime(0.04, audioCtx.currentTime); o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+0.1);
+            } else if (type === 'explosion') {
+                const bS = audioCtx.sampleRate * 0.2; const b = audioCtx.createBuffer(1, bS, audioCtx.sampleRate);
+                const d = b.getChannelData(0); for(let i=0; i<bS; i++) d[i] = Math.random()*2-1;
+                const n = audioCtx.createBufferSource(); n.buffer=b; const f = audioCtx.createBiquadFilter(); f.type='lowpass'; f.frequency.setValueAtTime(400, audioCtx.currentTime);
+                const g = audioCtx.createGain(); g.gain.setValueAtTime(0.2, audioCtx.currentTime); n.connect(f); f.connect(g); g.connect(audioCtx.destination); n.start();
+            }
+        }
+
+        // --- CORE ---
+        const scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x000000, 0.03);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const composer = new EffectComposer(renderer);
+        composer.addPass(new RenderPass(scene, camera));
+        composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.5, 0.4, 0.85));
+        composer.addPass(new OutputPass());
+
+        scene.add(new THREE.GridHelper(1000, 60, 0x16213e, 0x050505));
+
+        const game = { active: false, paused: false, camDist: 12, lastSpawn: 0 };
+        const player = {
+            group: new THREE.Group(),
+            mesh: new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.2, 4), new THREE.MeshStandardMaterial({ color: 0x4ecca3, emissive: 0x4ecca3, emissiveIntensity: 2 })),
+            hp: 100, level: 1, exp: 0, expNeeded: 100, speed: 0.15, fireRate: 600, lastShot: 0, damage: 30
+        };
+        player.mesh.rotation.x = Math.PI/2; player.group.add(player.mesh); player.group.position.y = 0.6;
+        scene.add(player.group);
+        const light = new THREE.PointLight(0x4ecca3, 40, 20); scene.add(light);
+
+        let yaw = 0, pitch = 0.5;
+        const enemies = [], bullets = [], orbs = [], particles = [];
+
+        // --- MOBILE CONTROLS ---
+        const joystick = { active: false, x: 0, y: 0 };
+        const joyZone = document.getElementById('joystick-zone');
+        const joyHandle = document.getElementById('joystick-handle');
+
+        // Тач для движения (Левая часть)
+        joyZone.addEventListener('touchstart', (e) => { joystick.active = true; });
+        window.addEventListener('touchmove', (e) => {
+            if (!joystick.active) return;
+            const touch = e.touches[0];
+            const rect = joyZone.getBoundingClientRect();
+            const centerX = rect.left + rect.width/2;
+            const centerY = rect.top + rect.height/2;
+            let dx = touch.clientX - centerX;
+            let dy = touch.clientY - centerY;
+            const dist = Math.min(60, Math.sqrt(dx*dx + dy*dy));
+            const angle = Math.atan2(dy, dx);
+            joystick.x = Math.cos(angle) * (dist/60);
+            joystick.y = Math.sin(angle) * (dist/60);
+            joyHandle.style.transform = `translate(calc(-50% + ${Math.cos(angle)*dist}px), calc(-50% + ${Math.sin(angle)*dist}px))`;
+        });
+        window.addEventListener('touchend', () => {
+            joystick.active = false; joystick.x = 0; joystick.y = 0;
+            joyHandle.style.transform = `translate(-50%, -50%)`;
+        });
+
+        // Тач для обзора (Правая часть)
+        let lastTouchX = 0, lastTouchY = 0;
+        window.addEventListener('touchstart', (e) => {
+            if (e.touches[0].clientX > window.innerWidth/2) {
+                lastTouchX = e.touches[0].clientX;
+                lastTouchY = e.touches[0].clientY;
+            }
+        });
+        window.addEventListener('touchmove', (e) => {
+            if (e.touches[0].clientX > window.innerWidth/2) {
+                const dx = e.touches[0].clientX - lastTouchX;
+                const dy = e.touches[0].clientY - lastTouchY;
+                yaw -= dx * 0.005;
+                pitch = Math.max(-0.4, Math.min(1.2, pitch + dy * 0.005));
+                lastTouchX = e.touches[0].clientX;
+                lastTouchY = e.touches[0].clientY;
+            }
+        });
+
+        document.getElementById('startBtn').onclick = () => {
+            audioCtx.resume(); game.active = true;
+            document.getElementById('instructions').style.display = 'none';
+        };
+
+        function explode(pos) {
+            playSfx('explosion');
+            for(let i=0; i<12; i++) {
+                const p = new THREE.Mesh(new THREE.SphereGeometry(0.12), new THREE.MeshBasicMaterial({ color: 0xe94560 }));
+                p.position.copy(pos); p.vel = new THREE.Vector3((Math.random()-0.5)*0.5, Math.random()*0.5, (Math.random()-0.5)*0.5);
+                p.life=1.0; scene.add(p); particles.push(p);
+            }
+        }
+
+        function levelUp() {
+            game.paused = true; player.exp = 0; player.expNeeded *= 1.5; player.level++;
+            document.getElementById('levelUp').style.display = 'block';
+            const ops = document.getElementById('options'); ops.innerHTML = '';
+            ['Damage+', 'Rate+'].forEach(t => {
+                const c = document.createElement('div'); c.className = 'card'; c.innerText = t;
+                c.onclick = () => { 
+                    if(t.includes('Damage')) player.damage += 20; 
+                    else player.fireRate *= 0.8;
+                    document.getElementById('levelUp').style.display = 'none'; game.paused = false; 
+                };
+                ops.appendChild(c);
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (!game.active || game.paused) return;
+
+            // ДВИЖЕНИЕ (ДЖОЙСТИК)
+            if (joystick.x !== 0 || joystick.y !== 0) {
+                player.group.rotation.y = yaw;
+                const move = new THREE.Vector3(joystick.x, 0, joystick.y).applyQuaternion(player.group.quaternion).multiplyScalar(player.speed);
+                player.group.position.add(move);
+            }
+
+            // КАМЕРА
+            const camPos = new THREE.Vector3(
+                player.group.position.x + Math.sin(yaw) * game.camDist * Math.cos(pitch),
+                player.group.position.y + Math.sin(pitch) * game.camDist + 4,
+                player.group.position.z + Math.cos(yaw) * game.camDist * Math.cos(pitch)
+            );
+            camera.position.lerp(camPos, 0.1);
+            camera.lookAt(player.group.position.clone().add(new THREE.Vector3(0, 1, 0)));
+            light.position.copy(player.group.position).y = 3;
+
+            // СТРЕЛЬБА И МОБЫ
+            if (Date.now() - player.lastShot > player.fireRate && enemies.length > 0) {
+                let target = enemies[0];
+                enemies.forEach(e => { if(e.position.distanceTo(player.group.position) < target.position.distanceTo(player.group.position)) target = e; });
+                const b = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+                b.position.copy(player.group.position);
+                b.vel = new THREE.Vector3().subVectors(target.position, b.position).normalize().multiplyScalar(0.8);
+                scene.add(b); bullets.push(b); playSfx('shot'); player.lastShot = Date.now();
+            }
+
+            // Обработка пуль и взрывов
+            for(let i=bullets.length-1; i>=0; i--) {
+                bullets[i].position.add(bullets[i].vel);
+                for(let j=enemies.length-1; j>=0; j--) {
+                    if(bullets[i].position.distanceTo(enemies[j].position) < 1.3) {
+                        enemies[j].hp -= player.damage;
+                        if(enemies[j].hp <= 0) {
+                            explode(enemies[j].position);
+                            const o = new THREE.Mesh(new THREE.OctahedronGeometry(0.3), new THREE.MeshBasicMaterial({ color: 0xf9ca24 }));
+                            o.position.copy(enemies[j].position); scene.add(o); orbs.push(o);
+                            scene.remove(enemies[j]); enemies.splice(j, 1);
+                        }
+                        scene.remove(bullets[i]); bullets.splice(i, 1); break;
+                    }
+                }
+            }
+
+            particles.forEach((p, i) => { p.position.add(p.vel); p.life -= 0.03; p.scale.setScalar(p.life); if(p.life <= 0) { scene.remove(p); particles.splice(i,1); } });
+            orbs.forEach((o, i) => { 
+                if(o.position.distanceTo(player.group.position) < 8) {
+                    o.position.lerp(player.group.position, 0.2);
+                    if(o.position.distanceTo(player.group.position) < 1) {
+                        player.exp += 20; if(player.exp >= player.expNeeded) levelUp();
+                        scene.remove(o); orbs.splice(i, 1);
+                    }
+                }
+            });
+
+            if (Date.now() - game.lastSpawn > 1500) {
+                const a = Math.random()*Math.PI*2;
+                const e = new THREE.Mesh(new THREE.DodecahedronGeometry(0.6), new THREE.MeshStandardMaterial({ color: 0xe94560, emissive: 0xe94560 }));
+                e.position.set(player.group.position.x+Math.cos(a)*35, 0.6, player.group.position.z+Math.sin(a)*35);
+                e.hp = 30; scene.add(e); enemies.push(e); game.lastSpawn = Date.now();
+            }<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D Neon Survivor - Telegram Edition</title>
+    <!-- Telegram Web App SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; touch-action: none; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; }
+        .stat { font-size: 14px; margin-bottom: 3px; color: #4ecca3; }
+        
+        /* Главное меню */
+        #menu { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            display: flex; flex-direction: column; justify-content: center; align-items: center; 
+            background: rgba(0,0,0,0.9); z-index: 100; 
+        }
+        .btn { background: #e94560; color: white; border: none; padding: 15px 40px; font-size: 18px; border-radius: 10px; cursor: pointer; font-weight: bold; }
+
+        /* Джойстик */
+        #joystickContainer {
+            position: absolute; bottom: 40px; left: 40px; width: 120px; height: 120px;
+            background: rgba(255,255,255,0.1); border-radius: 50%; z-index: 20;
+            display: none; /* Покажем только при старте */
+        }
+        #joystickKnob {
+            position: absolute; top: 50%; left: 50%; width: 50px; height: 50px;
+            background: #4ecca3; border-radius: 50%; transform: translate(-50%, -50%);
+        }
+
+        #levelUp { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            background: #16213e; padding: 20px; border: 2px solid #e94560; border-radius: 15px;
+            display: none; z-index: 200; text-align: center; width: 80%;
+        }
+        .card { background: #0f3460; padding: 15px; margin: 10px 0; border-radius: 8px; border: 1px solid #30475e; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div id="menu">
+        <h1 style="color: #e94560; margin-bottom: 20px;">NEON SURVIVOR</h1>
+        <button class="btn" id="startBtn">START MISSION</button>
+        <p style="font-size: 10px; margin-top: 20px; color: #555;">v1.0 Telegram Web App</p>
+    </div>
+
+    <div id="ui">
+        <div class="stat">HP: <span id="hp">100</span> | LVL: <span id="lvl">1</span></div>
+        <div class="stat">EXP: <span id="exp">0</span>/<span id="expNeeded">100</span></div>
+    </div>
+
+    <div id="joystickContainer"><div id="joystickKnob"></div></div>
+
+    <div id="levelUp">
+        <h2 style="color: #e94560">LEVEL UP</h2>
+        <div id="options"></div>
+    </div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+        // Инициализация Telegram
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.ready();
+        tg.headerColor = '#000000';
+
+        // --- AUDIO ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSfx(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            if (type === 'shot') {
+                const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+                o.type='triangle'; o.frequency.setValueAtTime(600, audioCtx.currentTime);
+                g.gain.setValueAtTime(0.04, audioCtx.currentTime);
+                o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+0.1);
+            }
+        }
+
+        // --- CORE ---
+        const scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x000000, 0.03);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const composer = new EffectComposer(renderer);
+        composer.addPass(new RenderPass(scene, camera));
+        composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.4, 0.85));
+        composer.addPass(new OutputPass());
+
+        scene.add(new THREE.GridHelper(1000, 80, 0x16213e, 0x050505));
+
+        const game = { active: false, paused: false };
+        const player = {
+            group: new THREE.Group(),
+            mesh: new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.2, 4), new THREE.MeshStandardMaterial({ color: 0x4ecca3, emissive: 0x4ecca3, emissiveIntensity: 2 })),
+            hp: 100, level: 1, exp: 0, expNeeded: 50, speed: 0.14, fireRate: 650, lastShot: 0, damage: 30
+        };
+        player.mesh.rotation.x = Math.PI/2; player.group.add(player.mesh);
+        scene.add(player.group);
+        const light = new THREE.PointLight(0x4ecca3, 40, 20); scene.add(light);
+
+        let yaw = 0, pitch = 0.6;
+        const enemies = [], bullets = [], orbs = [], particles = [];
+
+        // --- МОБИЛЬНОЕ УПРАВЛЕНИЕ ---
+        let touchX = 0, touchY = 0;
+        let joyVector = { x: 0, y: 0 };
+
+        const joyContainer = document.getElementById('joystickContainer');
+        const joyKnob = document.getElementById('joystickKnob');
+
+        document.addEventListener('touchstart', (e) => {
+            if (!game.active || game.paused) return;
+            const t = e.touches[0];
+            if (t.clientX < window.innerWidth / 2) {
+                // Левая часть экрана - джойстик
+                joyContainer.style.display = 'block';
+                joyContainer.style.left = (t.clientX - 60) + 'px';
+                joyContainer.style.bottom = (window.innerHeight - t.clientY - 60) + 'px';
+            }
+            touchX = t.clientX; touchY = t.clientY;
+        });
+
+        document.addEventListener('touchmove', (e) => {
+            if (!game.active || game.paused) return;
+            const t = e.touches[0];
+            const dx = t.clientX - touchX;
+            const dy = t.clientY - touchY;
+
+            if (t.clientX < window.innerWidth / 2) {
+                // Двигаем джойстик
+                const dist = Math.min(60, Math.sqrt(dx*dx + dy*dy));
+                const angle = Math.atan2(dy, dx);
+                joyVector.x = Math.cos(angle) * (dist/60);
+                joyVector.y = Math.sin(angle) * (dist/60);
+                joyKnob.style.left = `calc(50% + ${joyVector.x * 40}px)`;
+                joyKnob.style.top = `calc(50% + ${joyVector.y * 40}px)`;
+            } else {
+                // Правая часть экрана - вращение камеры
+                yaw -= dx * 0.005;
+                pitch = Math.max(-0.2, Math.min(1.1, pitch + dy * 0.005));
+                touchX = t.clientX; touchY = t.clientY;
+            }
+        });
+
+        document.addEventListener('touchend', () => {
+            joyContainer.style.display = 'none';
+            joyVector = { x: 0, y: 0 };
+        });
+
+        // --- GAME LOGIC ---
+        document.getElementById('startBtn').onclick = () => {
+            audioCtx.resume();
+            game.active = true;
+            document.getElementById('menu').style.display = 'none';
+        };
+
+        function levelUp() {
+            game.paused = true;
+            player.exp -= player.expNeeded; player.expNeeded *= 1.5; player.level++;
+            document.getElementById('levelUp').style.display = 'block';
+            const ops = document.getElementById('options'); ops.innerHTML = '';
+            ['Damage+', 'Reload Speed+', 'Move Speed+'].forEach(t => {
+                const c = document.createElement('div'); c.className = 'card'; c.innerText = t;
+                c.onclick = () => {
+                    if(t.includes('Damage')) player.damage += 15;
+                    if(t.includes('Reload')) player.fireRate *= 0.85;
+                    if(t.includes('Move')) player.speed *= 1.1;
+                    document.getElementById('levelUp').style.display = 'none';
+                    game.paused = false;
+                };
+                ops.appendChild(c);
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (game.active && !game.paused) {
+                // Движение
+                player.group.rotation.y = yaw;
+                if (joyVector.x !== 0 || joyVector.y !== 0) {
+                    const move = new THREE.Vector3(joyVector.x, 0, joyVector.y).applyQuaternion(player.group.quaternion).multiplyScalar(player.speed);
+                    player.group.position.add(move);
+                }
+
+                // Стрельба
+                if (Date.now() - player.lastShot > player.fireRate && enemies.length > 0) {
+                    const target = enemies[0];
+                    const b = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+                    b.position.copy(player.group.position);
+                    b.vel = new THREE.Vector3().subVectors(target.position, b.position).normalize().multiplyScalar(0.7);
+                    scene.add(b); bullets.push(b); playSfx('shot');
+                    player.lastShot = Date.now();
+                }
+
+                // Пули и враги
+                for(let i=bullets.length-1; i>=0; i--) {
+                    const b = bullets[i]; b.position.add(b.vel);
+                    if(b.position.distanceTo(player.group.position) > 40) { scene.remove(b); bullets.splice(i, 1); continue; }
+                    for(let j=enemies.length-1; j>=0; j--) {
+                        if(b.position.distanceTo(enemies[j].position) < 1.3) {
+                            enemies[j].hp -= player.damage;
+                            if(enemies[j].hp <= 0) {
+                                const o = new THREE.Mesh(new THREE.OctahedronGeometry(0.3), new THREE.MeshBasicMaterial({ color: 0xf9ca24 }));
+                                o.position.copy(enemies[j].position); scene.add(o); orbs.push(o);
+                                scene.remove(enemies[j]); enemies.splice(j, 1);
+                            }
+                            scene.remove(b); bullets.splice(i, 1); break;
+                        }
+                    }
+                }
+
+                // Опыт и спавн
+                orbs.forEach((o, i) => {
+                    if(o.position.distanceTo(player.group.position) < 7) {
+                        o.position.lerp(player.group.position, 0.2);
+                        if(o.position.distanceTo(player.group.position) < 1.1) {
+                            player.exp += 25; if(player.exp >= player.expNeeded) levelUp();
+                            scene.remove(o); orbs.splice(i, 1);
+                        }
+                    }
+                });
+
+                if(Math.random() < 0.02) {
+                    const a = Math.random()*Math.PI*2;
+                    const e = new THREE.Mesh(new THREE.DodecahedronGeometry(0.6), new THREE.MeshStandardMaterial({ color: 0xe94560, emissive: 0xe94560 }));
+                    e.position.set(player.group.position.x+Math.cos(a)*35, 0.6, player.group.position.z+Math.sin(a)*35);
+                    e.hp = 30; scene.add(e); enemies.push(e);
+                }
+                enemies.forEach(e => e.position.add(new THREE.Vector3().subVectors(player.group.position, e.position).normalize().multiplyScalar(0.06)));
+            }
+
+            // Камера
+            const camD = 10;
+            const tCam = new THREE.Vector3(
+                player.group.position.x + Math.sin(yaw)*camD*Math.cos(pitch),
+                player.group.position.y + Math.sin(pitch)*camD + 4,
+                player.group.position.z + Math.cos(yaw)*camD*Math.cos(pitch)
+            );
+            camera.position.lerp(tCam, 0.1);
+            camera.lookAt(player.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)));
+            light.position.copy(player.group.position).y = 3;
+
+            document.getElementById('hp').innerText = Math.floor(player.hp);
+            document.getElementById('lvl').innerText = player.level;
+            composer.render();
+        }
+        animate();
+    </script>
+</body>
+</html>
+
+            enemies.forEach(e => e.position.add(new THREE.Vector3().subVectors(player.group.position, e.position).normalize().multiplyScalar(0.06)));
+
+            document.getElementById('hp').innerText = Math.floor(player.hp);
+            document.getElementById('lvl').innerText = player.level;
+            composer.render();
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

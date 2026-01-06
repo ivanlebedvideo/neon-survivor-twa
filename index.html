@@ -3,41 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neon Survivor TWA</title>
+    <title>Neon Survivor TWA - Fixed</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; touch-action: none; }
         #ui { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; }
-        .stat { font-size: 14px; color: #4ecca3; text-shadow: 0 0 5px #000; }
+        .stat { font-size: 13px; color: #4ecca3; margin-bottom: 2px; }
         
-        #menu { 
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
-            display: flex; flex-direction: column; justify-content: center; align-items: center; 
-            background: rgba(0,0,0,0.95); z-index: 100; padding: 20px; box-sizing: border-box;
-        }
-        .menu-box { background: #16213e; padding: 25px; border: 2px solid #e94560; border-radius: 15px; width: 100%; max-width: 320px; text-align: center; }
+        #menu { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0,0,0,0.95); z-index: 100; padding: 20px; box-sizing: border-box; }
+        .menu-box { background: #16213e; padding: 25px; border: 2px solid #e94560; border-radius: 15px; width: 100%; max-width: 300px; text-align: center; }
         
-        .setting { margin: 15px 0; text-align: left; }
-        .setting label { font-size: 11px; color: #4ecca3; display: block; margin-bottom: 5px; }
+        .setting { margin: 12px 0; text-align: left; }
+        .setting label { font-size: 10px; color: #4ecca3; display: block; margin-bottom: 4px; }
         .val { float: right; color: #f9ca24; font-weight: bold; }
         
-        input[type=range] { width: 100%; accent-color: #e94560; }
-        #startBtn { 
-            background: #e94560; color: white; border: none; padding: 15px; 
-            width: 100%; font-size: 18px; font-weight: bold; border-radius: 8px; margin-top: 10px;
-        }
+        input[type=range] { width: 100%; accent-color: #e94560; height: 20px; }
+        #startBtn { background: #e94560; color: white; border: none; padding: 15px; width: 100%; font-size: 18px; font-weight: bold; border-radius: 10px; margin-top: 15px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 
-        #joyBound { position: absolute; bottom: 30px; left: 30px; width: 100px; height: 100px; background: rgba(255,255,255,0.05); border-radius: 50%; border: 1px solid rgba(78, 204, 163, 0.2); display: none; }
+        #joyBound { position: absolute; bottom: 30px; left: 30px; width: 100px; height: 100px; background: rgba(255,255,255,0.05); border-radius: 50%; border: 1px solid rgba(78, 204, 163, 0.2); display: none; pointer-events: none; }
         #joyStick { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; background: #4ecca3; border-radius: 50%; transform: translate(-50%, -50%); }
 
         #levelUp { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #16213e; padding: 20px; border: 2px solid #e94560; border-radius: 15px; display: none; z-index: 200; width: 80%; text-align: center; }
-        .card { background: #0f3460; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid #30475e; font-weight: bold; }
+        .card { background: #0f3460; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid #30475e; font-size: 14px; }
+        
+        #errorLog { position: absolute; bottom: 5px; width: 100%; font-size: 8px; color: red; text-align: center; pointer-events: none; }
     </style>
 </head>
 <body>
+    <!-- Лог ошибок для отладки прямо в Телеграме -->
+    <div id="errorLog"></div>
+
     <div id="menu">
         <div class="menu-box">
-            <h2 style="color: #e94560; margin: 0 0 20px 0;">NEON SURVIVOR</h2>
+            <h2 style="color: #e94560; margin: 0 0 15px 0; font-size: 22px;">NEON SURVIVOR</h2>
             <div class="setting">
                 <label>XP MULT <span id="xpVal" class="val">x2</span></label>
                 <input type="range" id="xpSlider" min="1" max="10" value="2">
@@ -53,6 +51,7 @@
     <div id="ui">
         <div class="stat">HP: <span id="hp">100</span> | LVL: <span id="lvl">1</span></div>
         <div class="stat">EXP: <span id="exp">0</span>/<span id="expNeeded">100</span></div>
+        <div id="activeStats" style="display:none"></div> <!-- Добавлен скрытый элемент, чтобы избежать ошибок -->
     </div>
 
     <div id="joyBound"><div id="joyStick"></div></div>
@@ -69,17 +68,20 @@
         import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
         import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
+        // Отлов ошибок для вывода на экран (поможет нам, если не заработает)
+        window.onerror = function(m, u, l) { document.getElementById('errorLog').innerText = m + " at " + l; };
+
         const tg = window.Telegram.WebApp; tg.expand(); tg.ready();
 
         let audioCtx; 
         function playSfx(type) {
-            if (!audioCtx || audioCtx.state === 'suspended') return;
-            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-            o.type = (type === 'explosion') ? 'sawtooth' : 'triangle';
-            o.frequency.setValueAtTime(type === 'explosion' ? 100 : 600, audioCtx.currentTime);
-            g.gain.setValueAtTime(0.05, audioCtx.currentTime);
-            g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-            o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + 0.1);
+            try {
+                if (!audioCtx || audioCtx.state === 'suspended') return;
+                const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+                o.type = 'triangle'; o.frequency.setValueAtTime(600, audioCtx.currentTime);
+                g.gain.setValueAtTime(0.04, audioCtx.currentTime);
+                o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + 0.1);
+            } catch(e) {}
         }
 
         const scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x000000, 0.03);
@@ -96,8 +98,7 @@
 
         const game = { active: false, paused: false, xpMult: 2, spawnMult: 1 };
         const player = {
-            group: new THREE.Group(),
-            hp: 100, level: 1, exp: 0, expNeeded: 100, speed: 0.14, fireRate: 600, lastShot: 0, damage: 30
+            group: new THREE.Group(), hp: 100, level: 1, exp: 0, expNeeded: 100, speed: 0.14, fireRate: 600, lastShot: 0, damage: 30, stats: {}
         };
         const pMesh = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.2, 4), new THREE.MeshStandardMaterial({ color: 0x4ecca3, emissive: 0x4ecca3, emissiveIntensity: 2 }));
         pMesh.rotation.x = Math.PI/2; player.group.add(pMesh); scene.add(player.group);
@@ -106,22 +107,22 @@
         let yaw = 0, pitch = 0.6;
         const enemies = [], bullets = [], orbs = [];
 
-        // --- УПРАВЛЕНИЕ ---
+        // Слайдеры
         const xpS = document.getElementById('xpSlider'), spS = document.getElementById('spawnSlider');
-        xpS.oninput = (e) => { game.xpMult = parseFloat(e.target.value); document.getElementById('xpVal').innerText = 'x'+game.xpMult; };
-        spS.oninput = (e) => { game.spawnMult = parseFloat(e.target.value); document.getElementById('spawnVal').innerText = 'x'+game.spawnMult; };
+        if(xpS) xpS.oninput = (e) => { game.xpMult = parseFloat(e.target.value); document.getElementById('xpVal').innerText = 'x'+game.xpMult; };
+        if(spS) spS.oninput = (e) => { game.spawnMult = parseFloat(e.target.value); document.getElementById('spawnVal').innerText = 'x'+game.spawnMult; };
 
+        // Джойстик
         let joyPos = { x: 0, y: 0 }, tStart = { x: 0, y: 0 };
         document.addEventListener('touchstart', (e) => {
             if (!game.active || game.paused) return;
             const t = e.touches[0];
             if (t.clientX < window.innerWidth / 2) {
-                document.getElementById('joyBound').style.display = 'block';
-                document.getElementById('joyBound').style.left = (t.clientX - 50) + 'px';
-                document.getElementById('joyBound').style.top = (t.clientY - 50) + 'px';
+                const jb = document.getElementById('joyBound');
+                jb.style.display = 'block'; jb.style.left = (t.clientX - 50) + 'px'; jb.style.top = (t.clientY - 50) + 'px';
             }
             tStart = { x: t.clientX, y: t.clientY };
-        });
+        }, {passive: false});
 
         document.addEventListener('touchmove', (e) => {
             if (!game.active || game.paused) return;
@@ -134,23 +135,24 @@
                 document.getElementById('joyStick').style.left = `calc(50% + ${joyPos.x * 35}px)`;
                 document.getElementById('joyStick').style.top = `calc(50% + ${joyPos.y * 35}px)`;
             } else {
-                yaw -= dx * 0.006; pitch = Math.max(-0.2, Math.min(1.1, pitch + dy * 0.006));
+                yaw -= dx * 0.007; pitch = Math.max(-0.2, Math.min(1.1, pitch + dy * 0.007));
                 tStart = { x: t.clientX, y: t.clientY };
             }
-        });
+        }, {passive: false});
 
         document.addEventListener('touchend', () => { 
-            document.getElementById('joyBound').style.display = 'none'; 
-            joyPos = { x: 0, y: 0 }; 
+            document.getElementById('joyBound').style.display = 'none'; joyPos = { x: 0, y: 0 }; 
         });
 
-        document.getElementById('startBtn').onclick = () => {
+        // КНОПКА СТАРТА
+        document.getElementById('startBtn').addEventListener('click', function() {
+            // Сначала запускаем игру, потом пробуем звук
+            game.active = true;
+            document.getElementById('menu').style.display = 'none';
+            
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            audioCtx.resume().then(() => {
-                game.active = true;
-                document.getElementById('menu').style.display = 'none';
-            });
-        };
+            if (audioCtx.state === 'suspended') audioCtx.resume().catch(e => console.log(e));
+        });
 
         function animate() {
             requestAnimationFrame(animate);
@@ -185,10 +187,10 @@
                     }
                 }
 
-                orbs.forEach((o, i) => {
-                    if(o.position.distanceTo(player.group.position) < 8) {
-                        o.position.lerp(player.group.position, 0.2);
-                        if(o.position.distanceTo(player.group.position) < 1.1) {
+                for(let i=orbs.length-1; i>=0; i--) {
+                    if(orbs[i].position.distanceTo(player.group.position) < 8) {
+                        orbs[i].position.lerp(player.group.position, 0.2);
+                        if(orbs[i].position.distanceTo(player.group.position) < 1.1) {
                             player.exp += 20 * game.xpMult;
                             if(player.exp >= player.expNeeded) { 
                                 game.paused = true; document.getElementById('levelUp').style.display = 'block';
@@ -199,10 +201,10 @@
                                     ops.appendChild(c);
                                 });
                             }
-                            scene.remove(o); orbs.splice(i, 1);
+                            scene.remove(orbs[i]); orbs.splice(i, 1);
                         }
                     }
-                });
+                }
 
                 if(Math.random() < 0.01 * game.spawnMult) {
                     const a = Math.random()*Math.PI*2;
@@ -222,6 +224,11 @@
             composer.render();
         }
         animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
